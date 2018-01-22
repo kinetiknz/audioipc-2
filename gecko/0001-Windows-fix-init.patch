@@ -1,0 +1,81 @@
+diff --git a/dom/media/CubebUtils.cpp b/dom/media/CubebUtils.cpp
+--- a/dom/media/CubebUtils.cpp
++++ b/dom/media/CubebUtils.cpp
+@@ -45,24 +45,26 @@
+ // Hidden pref used by tests to force failure to obtain cubeb context
+ #define PREF_CUBEB_FORCE_NULL_CONTEXT "media.cubeb.force_null_context"
+ // Hidden pref to disable BMO 1427011 experiment; can be removed once proven.
+ #define PREF_CUBEB_DISABLE_DEVICE_SWITCHING "media.cubeb.disable_device_switching"
+ #define PREF_CUBEB_SANDBOX "media.cubeb.sandbox"
+ #define PREF_AUDIOIPC_POOL_SIZE "media.audioipc.pool_size"
+ #define PREF_AUDIOIPC_STACK_SIZE "media.audioipc.stack_size"
+ 
+-#if (defined(XP_LINUX) && !defined(MOZ_WIDGET_ANDROID)) || defined(XP_MACOSX)
++#if (defined(XP_LINUX) && !defined(MOZ_WIDGET_ANDROID)) || defined(XP_MACOSX) || defined(XP_WIN)
+ #define MOZ_CUBEB_REMOTING
+ #endif
+ 
+ extern "C" {
+ 
++// This must match AudioIpcInitParams in media/audioipc/client/src/lib.rs.
++// TODO: Generate this from the Rust definition rather than duplicating it.
+ struct AudioIpcInitParams {
+-  int mServerConnection;
++  mozilla::ipc::FileDescriptor::PlatformHandleType mServerConnection;
+   size_t mPoolSize;
+   size_t mStackSize;
+   void (*mThreadCreateCallback)(const char*);
+ };
+ 
+ // These functions are provided by audioipc-server crate
+ extern void* audioipc_server_start();
+ extern mozilla::ipc::FileDescriptor::PlatformHandleType audioipc_server_new_client(void*);
+@@ -398,19 +400,24 @@ void InitAudioIPCConnection()
+                 });
+ }
+ #endif
+ 
+ ipc::FileDescriptor CreateAudioIPCConnection()
+ {
+ #ifdef MOZ_CUBEB_REMOTING
+   MOZ_ASSERT(sServerHandle);
+-  int rawFD = audioipc_server_new_client(sServerHandle);
++  mozilla::ipc::FileDescriptor::PlatformHandleType rawFD = audioipc_server_new_client(sServerHandle);
+   ipc::FileDescriptor fd(rawFD);
++  // TODO: Find cleaner cross-platform way to do this.
++#ifdef XP_WIN
++  CloseHandle(rawFD);
++#else
+   close(rawFD);
++#endif
+   return fd;
+ #else
+   return ipc::FileDescriptor();
+ #endif
+ }
+ 
+ cubeb* GetCubebContextUnlocked()
+ {
+diff --git a/toolkit/library/rust/gkrust-features.mozbuild b/toolkit/library/rust/gkrust-features.mozbuild
+--- a/toolkit/library/rust/gkrust-features.mozbuild
++++ b/toolkit/library/rust/gkrust-features.mozbuild
+@@ -13,15 +13,16 @@ if CONFIG['MOZ_BUILD_WEBRENDER']:
+     gkrust_features += ['quantum_render']
+ 
+ if CONFIG['MOZ_PULSEAUDIO']:
+     gkrust_features += ['cubeb_pulse_rust']
+ 
+ if CONFIG['MOZ_RUST_SIMD']:
+     gkrust_features += ['simd-accel']
+ 
+-# This feature is only supported on Linux and macOS, and this check needs to
+-# match MOZ_CUBEB_REMOTING in CubebUtils.cpp.
+-if (CONFIG['OS_ARCH'] == 'Linux' and CONFIG['OS_TARGET'] != 'Android') or CONFIG['OS_ARCH'] == 'Darwin':
++# This feature is only supported on Linux, macOS, and Windows, and this
++# check needs to match MOZ_CUBEB_REMOTING in CubebUtils.cpp.
++if ((CONFIG['OS_ARCH'] == 'Linux' and CONFIG['OS_TARGET'] != 'Android') or
++    CONFIG['OS_ARCH'] == 'Darwin' or CONFIG['OS_ARCH'] == 'WINNT'):
+     gkrust_features += ['cubeb-remoting']
+ 
+ if CONFIG['MOZ_MEMORY']:
+     gkrust_features += ['moz_memory']
