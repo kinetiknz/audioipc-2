@@ -348,7 +348,7 @@ impl CubebServer {
             // Ensure we're running on a loop different to the one
             // invoking spawn_fn.
             assert_ne!(id, handle.id());
-            let stream = UnixStream::from_stream(stm2, handle).unwrap();
+            let stream = UnixStream::from_std(stm2, handle.new_tokio_handle()).unwrap();
             let transport = framed(stream, Default::default());
             let rpc = rpc::bind_client::<CallbackClient>(transport, handle);
             drop(tx.send(rpc));
@@ -502,7 +502,7 @@ pub extern "C" fn audioipc_server_new_client(p: *mut c_void) -> libc::c_int {
             // via remote handle.
             wrapper.core_thread.remote().spawn(|handle| {
                 trace!("Incoming connection");
-                UnixStream::from_stream(sock2, handle)
+                UnixStream::from_std(sock2, handle.new_tokio_handle())
                     .and_then(|sock| {
                         let transport = framed_with_fds(sock, Default::default());
                         rpc::bind_server(transport, CubebServer::new(cb_remote), handle);

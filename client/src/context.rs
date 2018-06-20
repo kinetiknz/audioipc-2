@@ -104,7 +104,7 @@ impl ContextOps for ClientContext {
 
             open_server_stream()
                 .ok()
-                .and_then(|stream| UnixStream::from_stream(stream, &handle).ok())
+                .and_then(|stream| UnixStream::from_std(stream, &handle.new_tokio_handle()).ok())
                 .and_then(|stream| bind_and_send_client(stream, &handle, &tx_rpc))
                 .ok_or_else(|| {
                     io::Error::new(

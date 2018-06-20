@@ -12,6 +12,7 @@ use iovec::IoVec;
 use std::io;
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_uds::UnixStream;
+use mio::Ready;
 
 pub trait AsyncRecvMsg: AsyncRead {
     /// Pull some bytes from this source into the specified `Buf`, returning
@@ -59,7 +60,7 @@ impl AsyncRecvMsg for UnixStream {
     where
         B: BufMut,
     {
-        if let Async::NotReady = <UnixStream>::poll_read(self) {
+        if let Async::NotReady = <UnixStream>::poll_read_ready(self, Ready::readable())? {
             return Ok(Async::NotReady);
         }
         let r = unsafe {
@@ -115,7 +116,7 @@ impl AsyncRecvMsg for UnixStream {
                 Ok((n, flags).into())
             }
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                self.need_read();
+                self.clear_read_ready()?;
                 Ok(Async::NotReady)
             }
             Err(e) => Err(e),
@@ -129,7 +130,7 @@ impl AsyncSendMsg for UnixStream {
         B: Buf,
         C: Buf,
     {
-        if let Async::NotReady = <UnixStream>::poll_write(self) {
+        if let Async::NotReady = <UnixStream>::poll_write_ready(self)? {
             return Ok(Async::NotReady);
         }
         let r = {
@@ -150,7 +151,7 @@ impl AsyncSendMsg for UnixStream {
                 Ok(Async::Ready(n))
             }
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                self.need_write();
+                self.clear_write_ready()?;
                 Ok(Async::NotReady)
             }
             Err(e) => Err(e),

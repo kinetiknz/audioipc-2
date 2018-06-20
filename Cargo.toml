@@ -1,2 +1,5 @@
 [workspace]
 members = ["audioipc", "client", "server", "ipctest"]
+
+[patch.crates-io]
+tokio-uds = { path = "../tokio-uds", version = "0.2.0" }

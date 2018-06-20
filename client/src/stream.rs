@@ -190,7 +190,7 @@ impl<'ctx> ClientStream<'ctx> {
 
         let (wait_tx, wait_rx) = mpsc::channel();
         ctx.remote().spawn(move |handle| {
-            let stream = UnixStream::from_stream(stream, handle).unwrap();
+            let stream = UnixStream::from_std(stream, handle.new_tokio_handle()).unwrap();
             let transport = framed(stream, Default::default());
             rpc::bind_server(transport, server, handle);
             wait_tx.send(()).unwrap();

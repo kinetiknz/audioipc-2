@@ -29,6 +29,8 @@ extern crate tokio_core;
 extern crate tokio_io;
 extern crate tokio_uds;
 
+extern crate mio;
+
 pub mod async;
 pub mod cmsg;
 pub mod codec;
