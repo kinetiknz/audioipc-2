@@ -30,7 +30,7 @@ diff --git a/dom/media/CubebUtils.cpp b/dom/media/CubebUtils.cpp
  // These functions are provided by audioipc-server crate
  extern void* audioipc_server_start();
  extern mozilla::ipc::FileDescriptor::PlatformHandleType audioipc_server_new_client(void*);
-@@ -398,19 +400,24 @@ void InitAudioIPCConnection()
+@@ -398,19 +400,29 @@ void InitAudioIPCConnection()
                  });
  }
  #endif
@@ -40,9 +40,14 @@ diff --git a/dom/media/CubebUtils.cpp b/dom/media/CubebUtils.cpp
  #ifdef MOZ_CUBEB_REMOTING
    MOZ_ASSERT(sServerHandle);
 -  int rawFD = audioipc_server_new_client(sServerHandle);
-+  mozilla::ipc::FileDescriptor::PlatformHandleType rawFD = audioipc_server_new_client(sServerHandle);
++  ipc::FileDescriptor::PlatformHandleType rawFD = audioipc_server_new_client(sServerHandle);
    ipc::FileDescriptor fd(rawFD);
-+  // TODO: Find cleaner cross-platform way to do this.
++  if (!fd.IsValid()) {
++    MOZ_LOG(gCubebLog, LogLevel::Error, ("audioipc_server_new_client failed"));
++    return ipc::FileDescriptor();
++  }
++  // Close rawFD since FileDescriptor's ctor cloned it.
++  // TODO: Find cleaner cross-platform way to close rawFD.
 +#ifdef XP_WIN
 +  CloseHandle(rawFD);
 +#else
