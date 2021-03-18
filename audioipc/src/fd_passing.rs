@@ -24,14 +24,14 @@ struct IncomingFds {
 
 impl IncomingFds {
     pub fn new(c: usize) -> Self {
-        let capacity = c * cmsg::space(mem::size_of::<[RawFd; 3]>());
+        let capacity = c * cmsg::space(mem::size_of::<[RawFd; 2]>());
         IncomingFds {
             cmsg: BytesMut::with_capacity(capacity),
             recv_fds: None,
         }
     }
 
-    pub fn take_fds(&mut self) -> Option<[RawFd; 3]> {
+    pub fn take_fds(&mut self) -> Option<[RawFd; 2]> {
         loop {
             let fds = self
                 .recv_fds
@@ -52,7 +52,7 @@ impl IncomingFds {
     }
 
     pub fn cmsg(&mut self) -> &mut BytesMut {
-        self.cmsg.reserve(cmsg::space(mem::size_of::<[RawFd; 3]>()));
+        self.cmsg.reserve(cmsg::space(mem::size_of::<[RawFd; 2]>()));
         &mut self.cmsg
     }
 }
@@ -288,7 +288,7 @@ pub fn framed_with_platformhandles<A, C>(io: A, codec: C) -> FramedWithPlatformH
         frames: VecDeque::new(),
         write_buf: BytesMut::with_capacity(INITIAL_CAPACITY),
         outgoing_fds: BytesMut::with_capacity(
-            FDS_CAPACITY * cmsg::space(mem::size_of::<[RawFd; 3]>()),
+            FDS_CAPACITY * cmsg::space(mem::size_of::<[RawFd; 2]>()),
         ),
     }
 }
