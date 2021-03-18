@@ -682,7 +682,7 @@ impl CubebServer {
 
         let (ipc_server, ipc_client) = MessageStream::anonymous_ipc_pair()?;
         debug!("Created callback pair: {:?}-{:?}", ipc_server, ipc_client);
-        let (shm, file) = SharedMem::new(&get_shm_id(), audioipc::SHM_AREA_SIZE)?;
+        let shm = SharedMem::new(&get_shm_id(), audioipc::SHM_AREA_SIZE)?;
 
         // This code is currently running on the Client/Server RPC
         // handling thread.  We need to move the registration of the
@@ -705,6 +705,12 @@ impl CubebServer {
             Err(_) => bail!("Failed to create callback rpc."),
         };
 
+        let handle = unsafe { shm.make_handle().unwrap() };
+        let dummy = handle.clone();
+        // XXX: if response is dropped without waiting on it, is it possible this doesn't run on the client?
+        // i.e. does ignore the response cause a cancellation?
+        rpc.call(CallbackReq::SharedMem(handle, self.remote_pid.unwrap()));
+
         let cbs = Box::new(ServerStreamCallbacks {
             input_frame_size,
             output_frame_size,
@@ -720,7 +726,7 @@ impl CubebServer {
 
         Ok(ClientMessage::StreamCreated(StreamCreate {
             token: key,
-            platform_handles: [PlatformHandle::from(ipc_client), file],
+            platform_handles: [PlatformHandle::from(ipc_client), dummy],
             target_pid: self.remote_pid.unwrap(),
         }))
     }

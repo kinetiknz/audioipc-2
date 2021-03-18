@@ -53,7 +53,7 @@ pub struct ClientStream<'ctx> {
 }
 
 struct CallbackServer {
-    shm: SharedMem,
+    shm: Option<SharedMem>,
     input: Option<Vec<u8>>,
     data_cb: ffi::cubeb_data_callback,
     state_cb: ffi::cubeb_state_callback,
@@ -88,7 +88,7 @@ impl rpc::Server for CallbackServer {
                 );
 
                 // Clone values that need to be moved into the cpu pool thread.
-                let mut shm = unsafe { self.shm.unsafe_view() };
+                let mut shm = unsafe { self.shm.as_ref().unwrap().unsafe_view() };
                 let input_copy_ptr = match &mut self.input {
                     Some(buf) => {
                         assert!(input_frame_size > 0);
@@ -172,6 +172,14 @@ impl rpc::Server for CallbackServer {
                     Ok(CallbackResp::DeviceChange)
                 })
             }
+            CallbackReq::SharedMem(handle, _) => {
+                let shm = unsafe {
+                    SharedMem::from(handle, audioipc::SHM_AREA_SIZE)
+                        .expect("Client failed to set up shmem")
+                };
+                self.shm = Some(shm);
+                self.cpu_pool.spawn_fn(move || Ok(CallbackResp::SharedMem))
+            }
         }
     }
 }
@@ -201,15 +209,6 @@ impl<'ctx> ClientStream<'ctx> {
         let stream =
             unsafe { audioipc::MessageStream::from_raw_fd(data.platform_handles[0].into_raw()) };
 
-        let shm =
-            match unsafe { SharedMem::from(&data.platform_handles[1], audioipc::SHM_AREA_SIZE) } {
-                Ok(shm) => shm,
-                Err(e) => {
-                    debug!("Client failed to set up shmem: {}", e);
-                    return Err(Error::error());
-                }
-            };
-
         let input = if init_params.input_stream_params.is_some() {
             Some(Vec::with_capacity(audioipc::SHM_AREA_SIZE))
         } else {
@@ -226,7 +225,7 @@ impl<'ctx> ClientStream<'ctx> {
         let (_shutdown_tx, shutdown_rx) = mpsc::channel();
 
         let server = CallbackServer {
-            shm,
+            shm: None,
             input,
             data_cb: data_callback,
             state_cb: state_callback,

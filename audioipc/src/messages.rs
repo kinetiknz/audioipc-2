@@ -266,6 +266,7 @@ pub enum CallbackReq {
     },
     State(ffi::cubeb_state),
     DeviceChange,
+    SharedMem(PlatformHandle, u32),
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -273,6 +274,7 @@ pub enum CallbackResp {
     Data(isize),
     State,
     DeviceChange,
+    SharedMem,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -352,7 +354,34 @@ impl AssocRawPlatformHandle for ClientMessage {
 impl AssocRawPlatformHandle for DeviceCollectionReq {}
 impl AssocRawPlatformHandle for DeviceCollectionResp {}
 
-impl AssocRawPlatformHandle for CallbackReq {}
+impl AssocRawPlatformHandle for CallbackReq {
+    fn platform_handles(&self) -> Option<([PlatformHandleType; 2], u32)> {
+        unsafe {
+            match *self {
+                CallbackReq::SharedMem(ref data, target_pid) => {
+                    Some(([data.clone().into_raw(), data.into_raw()], target_pid))
+                }
+                _ => None,
+            }
+        }
+    }
+
+    fn take_platform_handles<F>(&mut self, f: F)
+    where
+        F: FnOnce() -> Option<[PlatformHandleType; 2]>,
+    {
+        let owned = cfg!(unix);
+        match *self {
+            CallbackReq::SharedMem(ref mut data, _) => {
+                let handles =
+                    f().expect("platform_handles must be available when processing SharedMem");
+                *data = PlatformHandle::new(handles[0], owned);
+            }
+            _ => {}
+        }
+    }
+}
+
 impl AssocRawPlatformHandle for CallbackResp {}
 
 #[cfg(test)]
