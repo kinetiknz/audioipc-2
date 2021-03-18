@@ -65,10 +65,10 @@ pub type PlatformHandleType = std::os::windows::raw::HANDLE;
 pub type PlatformHandleType = libc::c_int;
 
 // This stands in for RawFd/RawHandle.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct PlatformHandle(RefCell<Inner>);
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 struct Inner {
     handle: PlatformHandleType,
     owned: bool,
@@ -165,6 +165,22 @@ impl PlatformHandle {
     pub fn duplicate(h: PlatformHandleType) -> Result<PlatformHandle, std::io::Error> {
         let dup = unsafe { platformhandle_passing::duplicate_platformhandle(h, None, false) }?;
         Ok(PlatformHandle::new(dup, true))
+    }
+}
+
+impl Clone for PlatformHandle {
+    #[cfg(unix)]
+    fn clone(&self) -> Self {
+        unsafe {
+            let newfd = libc::dup(self.as_raw());
+            assert!(newfd >= 0);
+            PlatformHandle::from(newfd)
+        }
+    }
+
+    #[cfg(windows)]
+    fn clone(&self) -> Self {
+        PlatformHandle::duplicate(unsafe { self.as_raw() }).unwrap()
     }
 }
 
