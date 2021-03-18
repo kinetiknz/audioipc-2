@@ -5,11 +5,13 @@
 
 use crate::ClientContext;
 use crate::{assert_not_in_callback, run_in_callback};
-use audioipc::frame::{framed, Framed};
-use audioipc::messages::{self, CallbackReq, CallbackResp, ClientMessage, ServerMessage};
 use audioipc::rpc;
 use audioipc::shm::SharedMem;
 use audioipc::{codec::LengthDelimitedCodec, messages::StreamCreateParams};
+use audioipc::{
+    messages::{self, CallbackReq, CallbackResp, ClientMessage, ServerMessage},
+    platformhandle_passing::{framed_with_platformhandles, FramedWithPlatformHandles},
+};
 use cubeb_backend::{ffi, DeviceRef, Error, Result, Stream, StreamOps};
 use futures::Future;
 use futures_cpupool::{CpuFuture, CpuPool};
@@ -66,8 +68,10 @@ impl rpc::Server for CallbackServer {
     type Request = CallbackReq;
     type Response = CallbackResp;
     type Future = CpuFuture<Self::Response, ()>;
-    type Transport =
-        Framed<audioipc::AsyncMessageStream, LengthDelimitedCodec<Self::Response, Self::Request>>;
+    type Transport = FramedWithPlatformHandles<
+        audioipc::AsyncMessageStream,
+        LengthDelimitedCodec<Self::Response, Self::Request>,
+    >;
 
     fn process(&mut self, req: Self::Request) -> Self::Future {
         match req {
@@ -237,7 +241,7 @@ impl<'ctx> ClientStream<'ctx> {
             .spawn(futures::future::lazy(move || {
                 let handle = reactor::Handle::default();
                 let stream = stream.into_tokio_ipc(&handle).unwrap();
-                let transport = framed(stream, Default::default());
+                let transport = framed_with_platformhandles(stream, Default::default());
                 rpc::bind_server(transport, server);
                 wait_tx.send(()).unwrap();
                 Ok(())

@@ -11,7 +11,6 @@ use audio_thread_priority::get_current_thread_info;
 #[cfg(not(target_os = "linux"))]
 use audio_thread_priority::promote_current_thread_to_real_time;
 use audioipc::codec::LengthDelimitedCodec;
-use audioipc::frame::{framed, Framed};
 use audioipc::platformhandle_passing::{framed_with_platformhandles, FramedWithPlatformHandles};
 use audioipc::{core, rpc};
 use audioipc::{
@@ -141,8 +140,10 @@ impl rpc::Server for DeviceCollectionServer {
     type Request = DeviceCollectionReq;
     type Response = DeviceCollectionResp;
     type Future = CpuFuture<Self::Response, ()>;
-    type Transport =
-        Framed<audioipc::AsyncMessageStream, LengthDelimitedCodec<Self::Response, Self::Request>>;
+    type Transport = FramedWithPlatformHandles<
+        audioipc::AsyncMessageStream,
+        LengthDelimitedCodec<Self::Response, Self::Request>,
+    >;
 
     fn process(&mut self, req: Self::Request) -> Self::Future {
         match req {
@@ -389,7 +390,7 @@ impl ContextOps for ClientContext {
                 .spawn(futures::future::lazy(move || {
                     let handle = reactor::Handle::default();
                     let stream = stream.into_tokio_ipc(&handle).unwrap();
-                    let transport = framed(stream, Default::default());
+                    let transport = framed_with_platformhandles(stream, Default::default());
                     rpc::bind_server(transport, server);
                     wait_tx.send(()).unwrap();
                     Ok(())
