@@ -31,7 +31,6 @@ pub use crate::fd_passing as platformhandle_passing;
 pub mod handle_passing;
 #[cfg(windows)]
 pub use handle_passing as platformhandle_passing;
-pub mod frame;
 pub mod messages;
 #[cfg(unix)]
 mod msg;

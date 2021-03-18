@@ -349,6 +349,12 @@ impl AssocRawPlatformHandle for ClientMessage {
     }
 }
 
+impl AssocRawPlatformHandle for DeviceCollectionReq {}
+impl AssocRawPlatformHandle for DeviceCollectionResp {}
+
+impl AssocRawPlatformHandle for CallbackReq {}
+impl AssocRawPlatformHandle for CallbackResp {}
+
 #[cfg(test)]
 mod test {
     use super::StreamParams;

@@ -6,13 +6,12 @@
 #[cfg(target_os = "linux")]
 use audio_thread_priority::{promote_thread_to_real_time, RtPriorityThreadInfo};
 use audioipc::codec::LengthDelimitedCodec;
-use audioipc::frame::{framed, Framed};
 use audioipc::messages::{
     CallbackReq, CallbackResp, ClientMessage, Device, DeviceCollectionReq, DeviceCollectionResp,
     DeviceInfo, RegisterDeviceCollectionChanged, ServerMessage, StreamCreate, StreamCreateParams,
     StreamInitParams, StreamParams,
 };
-use audioipc::platformhandle_passing::FramedWithPlatformHandles;
+use audioipc::platformhandle_passing::{framed_with_platformhandles, FramedWithPlatformHandles};
 use audioipc::rpc;
 use audioipc::shm::SharedMem;
 use audioipc::{MessageStream, PlatformHandle};
@@ -208,8 +207,10 @@ struct DeviceCollectionClient;
 impl rpc::Client for DeviceCollectionClient {
     type Request = DeviceCollectionReq;
     type Response = DeviceCollectionResp;
-    type Transport =
-        Framed<audioipc::AsyncMessageStream, LengthDelimitedCodec<Self::Request, Self::Response>>;
+    type Transport = FramedWithPlatformHandles<
+        audioipc::AsyncMessageStream,
+        LengthDelimitedCodec<Self::Request, Self::Response>,
+    >;
 }
 
 struct CallbackClient;
@@ -217,8 +218,10 @@ struct CallbackClient;
 impl rpc::Client for CallbackClient {
     type Request = CallbackReq;
     type Response = CallbackResp;
-    type Transport =
-        Framed<audioipc::AsyncMessageStream, LengthDelimitedCodec<Self::Request, Self::Response>>;
+    type Transport = FramedWithPlatformHandles<
+        audioipc::AsyncMessageStream,
+        LengthDelimitedCodec<Self::Request, Self::Response>,
+    >;
 }
 
 struct ServerStreamCallbacks {
@@ -567,7 +570,7 @@ impl CubebServer {
                         .spawn(futures::future::lazy(move || {
                             let handle = reactor::Handle::default();
                             let stream = ipc_server.into_tokio_ipc(&handle).unwrap();
-                            let transport = framed(stream, Default::default());
+                            let transport = framed_with_platformhandles(stream, Default::default());
                             let rpc = rpc::bind_client::<DeviceCollectionClient>(transport);
                             drop(tx.send(rpc));
                             Ok(())
@@ -690,7 +693,7 @@ impl CubebServer {
             .spawn(futures::future::lazy(move || {
                 let handle = reactor::Handle::default();
                 let stream = ipc_server.into_tokio_ipc(&handle).unwrap();
-                let transport = framed(stream, Default::default());
+                let transport = framed_with_platformhandles(stream, Default::default());
                 let rpc = rpc::bind_client::<CallbackClient>(transport);
                 drop(tx.send(rpc));
                 Ok(())
