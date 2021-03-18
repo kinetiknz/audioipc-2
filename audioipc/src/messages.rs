@@ -178,13 +178,13 @@ fn opt_str(v: Option<Vec<u8>>) -> *mut c_char {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StreamCreate {
     pub token: usize,
-    pub platform_handles: [PlatformHandle; 2],
+    pub platform_handle: PlatformHandle,
     pub target_pid: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RegisterDeviceCollectionChanged {
-    pub platform_handles: [PlatformHandle; 2],
+    pub platform_handle: PlatformHandle,
     pub target_pid: u32,
 }
 
@@ -288,13 +288,13 @@ pub enum DeviceCollectionResp {
 }
 
 pub trait AssocRawPlatformHandle {
-    fn platform_handles(&self) -> Option<([PlatformHandleType; 2], u32)> {
+    fn platform_handle(&self) -> Option<(PlatformHandleType, u32)> {
         None
     }
 
-    fn take_platform_handles<F>(&mut self, f: F)
+    fn take_platform_handle<F>(&mut self, f: F)
     where
-        F: FnOnce() -> Option<[PlatformHandleType; 2]>,
+        F: FnOnce() -> Option<PlatformHandleType>,
     {
         assert!(f().is_none());
     }
@@ -303,48 +303,34 @@ pub trait AssocRawPlatformHandle {
 impl AssocRawPlatformHandle for ServerMessage {}
 
 impl AssocRawPlatformHandle for ClientMessage {
-    fn platform_handles(&self) -> Option<([PlatformHandleType; 2], u32)> {
+    fn platform_handle(&self) -> Option<(PlatformHandleType, u32)> {
         unsafe {
             match *self {
-                ClientMessage::StreamCreated(ref data) => Some((
-                    [
-                        data.platform_handles[0].into_raw(),
-                        data.platform_handles[1].into_raw(),
-                    ],
-                    data.target_pid,
-                )),
-                ClientMessage::ContextSetupDeviceCollectionCallback(ref data) => Some((
-                    [
-                        data.platform_handles[0].into_raw(),
-                        data.platform_handles[1].into_raw(),
-                    ],
-                    data.target_pid,
-                )),
+                ClientMessage::StreamCreated(ref data) => {
+                    Some((data.platform_handle.into_raw(), data.target_pid))
+                }
+                ClientMessage::ContextSetupDeviceCollectionCallback(ref data) => {
+                    Some((data.platform_handle.into_raw(), data.target_pid))
+                }
                 _ => None,
             }
         }
     }
 
-    fn take_platform_handles<F>(&mut self, f: F)
+    fn take_platform_handle<F>(&mut self, f: F)
     where
-        F: FnOnce() -> Option<[PlatformHandleType; 2]>,
+        F: FnOnce() -> Option<PlatformHandleType>,
     {
         let owned = cfg!(unix);
         match *self {
             ClientMessage::StreamCreated(ref mut data) => {
-                let handles =
+                let handle =
                     f().expect("platform_handles must be available when processing StreamCreated");
-                data.platform_handles = [
-                    PlatformHandle::new(handles[0], owned),
-                    PlatformHandle::new(handles[1], owned),
-                ]
+                data.platform_handle = PlatformHandle::new(handle, owned);
             }
             ClientMessage::ContextSetupDeviceCollectionCallback(ref mut data) => {
-                let handles = f().expect("platform_handles must be available when processing ContextSetupDeviceCollectionCallback");
-                data.platform_handles = [
-                    PlatformHandle::new(handles[0], owned),
-                    PlatformHandle::new(handles[1], owned),
-                ]
+                let handle = f().expect("platform_handles must be available when processing ContextSetupDeviceCollectionCallback");
+                data.platform_handle = PlatformHandle::new(handle, owned);
             }
             _ => {}
         }
@@ -355,29 +341,24 @@ impl AssocRawPlatformHandle for DeviceCollectionReq {}
 impl AssocRawPlatformHandle for DeviceCollectionResp {}
 
 impl AssocRawPlatformHandle for CallbackReq {
-    fn platform_handles(&self) -> Option<([PlatformHandleType; 2], u32)> {
+    fn platform_handle(&self) -> Option<(PlatformHandleType, u32)> {
         unsafe {
-            match *self {
-                CallbackReq::SharedMem(ref data, target_pid) => {
-                    Some(([data.clone().into_raw(), data.into_raw()], target_pid))
-                }
-                _ => None,
+            if let CallbackReq::SharedMem(ref data, target_pid) = *self {
+                Some((data.into_raw(), target_pid))
+            } else {
+                None
             }
         }
     }
 
-    fn take_platform_handles<F>(&mut self, f: F)
+    fn take_platform_handle<F>(&mut self, f: F)
     where
-        F: FnOnce() -> Option<[PlatformHandleType; 2]>,
+        F: FnOnce() -> Option<PlatformHandleType>,
     {
         let owned = cfg!(unix);
-        match *self {
-            CallbackReq::SharedMem(ref mut data, _) => {
-                let handles =
-                    f().expect("platform_handles must be available when processing SharedMem");
-                *data = PlatformHandle::new(handles[0], owned);
-            }
-            _ => {}
+        if let CallbackReq::SharedMem(ref mut data, _) = *self {
+            let handle = f().expect("platform_handle must be available when processing SharedMem");
+            *data = PlatformHandle::new(handle, owned);
         }
     }
 }

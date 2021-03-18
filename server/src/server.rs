@@ -577,20 +577,13 @@ impl CubebServer {
                         }))
                         .expect("Failed to spawn DeviceCollectionClient");
 
-                    // TODO: The lowest comms layer expects exactly 2 PlatformHandles, but we only
-                    // need one here.  Send a dummy handle over for the other side to discard.
-                    let (dummy, _) =
-                        MessageStream::anonymous_ipc_pair().expect("need dummy IPC pair");
                     if let Ok(rpc) = rx.wait() {
                         self.cbs = Some(Rc::new(RefCell::new(CubebServerCallbacks {
                             rpc,
                             devtype: cubeb::DeviceType::empty(),
                         })));
                         let fds = RegisterDeviceCollectionChanged {
-                            platform_handles: [
-                                PlatformHandle::from(ipc_client),
-                                PlatformHandle::from(dummy),
-                            ],
+                            platform_handle: PlatformHandle::from(ipc_client),
                             target_pid: self.remote_pid.unwrap(),
                         };
 
@@ -706,7 +699,6 @@ impl CubebServer {
         };
 
         let handle = unsafe { shm.make_handle().unwrap() };
-        let dummy = handle.clone();
         // XXX: if response is dropped without waiting on it, is it possible this doesn't run on the client?
         // i.e. does ignore the response cause a cancellation?
         rpc.call(CallbackReq::SharedMem(handle, self.remote_pid.unwrap()));
@@ -726,7 +718,7 @@ impl CubebServer {
 
         Ok(ClientMessage::StreamCreated(StreamCreate {
             token: key,
-            platform_handles: [PlatformHandle::from(ipc_client), dummy],
+            platform_handle: PlatformHandle::from(ipc_client),
             target_pid: self.remote_pid.unwrap(),
         }))
     }
