@@ -5,7 +5,7 @@
 const uint8_t*
 cmsghdr_bytes(size_t* size)
 {
-  int myfds[3] = {0, 1, 2};
+  int myfds[2] = {0, 1};
 
   static union {
     uint8_t buf[CMSG_SPACE(sizeof(myfds))];

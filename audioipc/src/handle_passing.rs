@@ -185,8 +185,7 @@ where
                 // our source handles.
                 let r1 = duplicate_platformhandle(handles[0], Some(target_pid), true);
                 let r2 = duplicate_platformhandle(handles[1], Some(target_pid), true);
-                let r3 = duplicate_platformhandle(handles[2], Some(target_pid), true);
-                [r1?, r2?, r3?]
+                [r1?, r2?]
             };
             trace!(
                 "item handles: {:?} remote_handles: {:?}",

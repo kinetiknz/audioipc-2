@@ -574,9 +574,9 @@ impl CubebServer {
                         }))
                         .expect("Failed to spawn DeviceCollectionClient");
 
-                    // TODO: The lowest comms layer expects exactly 3 PlatformHandles, but we only
-                    // need one here.  Send some dummy handles over for the other side to discard.
-                    let (dummy1, dummy2) =
+                    // TODO: The lowest comms layer expects exactly 2 PlatformHandles, but we only
+                    // need one here.  Send a dummy handle over for the other side to discard.
+                    let (dummy, _) =
                         MessageStream::anonymous_ipc_pair().expect("need dummy IPC pair");
                     if let Ok(rpc) = rx.wait() {
                         self.cbs = Some(Rc::new(RefCell::new(CubebServerCallbacks {
@@ -586,8 +586,7 @@ impl CubebServer {
                         let fds = RegisterDeviceCollectionChanged {
                             platform_handles: [
                                 PlatformHandle::from(ipc_client),
-                                PlatformHandle::from(dummy1),
-                                PlatformHandle::from(dummy2),
+                                PlatformHandle::from(dummy),
                             ],
                             target_pid: self.remote_pid.unwrap(),
                         };
@@ -680,11 +679,7 @@ impl CubebServer {
 
         let (ipc_server, ipc_client) = MessageStream::anonymous_ipc_pair()?;
         debug!("Created callback pair: {:?}-{:?}", ipc_server, ipc_client);
-        let shm_id = get_shm_id();
-        let (shm, file) = SharedMem::new(&format!("{}-input", shm_id), audioipc::SHM_AREA_SIZE)?;
-        // TODO: The lowest comms layer expects exactly 3 PlatformHandles, but we no longer use the last
-        // PlatformHandle slot, so pass a clone of the shm handle as a dummy value for the client to drop.
-        let dummy = file.clone();
+        let (shm, file) = SharedMem::new(&get_shm_id(), audioipc::SHM_AREA_SIZE)?;
 
         // This code is currently running on the Client/Server RPC
         // handling thread.  We need to move the registration of the
@@ -722,7 +717,7 @@ impl CubebServer {
 
         Ok(ClientMessage::StreamCreated(StreamCreate {
             token: key,
-            platform_handles: [PlatformHandle::from(ipc_client), file, dummy],
+            platform_handles: [PlatformHandle::from(ipc_client), file],
             target_pid: self.remote_pid.unwrap(),
         }))
     }
