@@ -160,6 +160,17 @@ impl PlatformHandle {
         self.0.borrow().handle
     }
 
+    #[cfg(unix)]
+    pub fn duplicate(h: PlatformHandleType) -> Result<PlatformHandle, std::io::Error> {
+        unsafe {
+            let newfd = libc::dup(h);
+            if newfd < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(PlatformHandle::from(newfd))
+        }
+    }
+
     #[cfg(windows)]
     pub fn duplicate(h: PlatformHandleType) -> Result<PlatformHandle, std::io::Error> {
         let dup = unsafe { platformhandle_passing::duplicate_platformhandle(h, None, false) }?;
@@ -168,16 +179,6 @@ impl PlatformHandle {
 }
 
 impl Clone for PlatformHandle {
-    #[cfg(unix)]
-    fn clone(&self) -> Self {
-        unsafe {
-            let newfd = libc::dup(self.as_raw());
-            assert!(newfd >= 0);
-            PlatformHandle::from(newfd)
-        }
-    }
-
-    #[cfg(windows)]
     fn clone(&self) -> Self {
         PlatformHandle::duplicate(unsafe { self.as_raw() }).unwrap()
     }
