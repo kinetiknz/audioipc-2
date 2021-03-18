@@ -24,20 +24,20 @@ struct IncomingFds {
 
 impl IncomingFds {
     pub fn new(c: usize) -> Self {
-        let capacity = c * cmsg::space(mem::size_of::<[RawFd; 2]>());
+        let capacity = c * cmsg::space(mem::size_of::<RawFd>());
         IncomingFds {
             cmsg: BytesMut::with_capacity(capacity),
             recv_fds: None,
         }
     }
 
-    pub fn take_fds(&mut self) -> Option<[RawFd; 2]> {
+    pub fn take_fd(&mut self) -> Option<RawFd> {
         loop {
             let fds = self
                 .recv_fds
                 .as_mut()
                 .and_then(|recv_fds| recv_fds.next())
-                .map(|fds| clone_into_array(&fds));
+                .map(|fds| fds[0]);
 
             if fds.is_some() {
                 return fds;
@@ -52,7 +52,7 @@ impl IncomingFds {
     }
 
     pub fn cmsg(&mut self) -> &mut BytesMut {
-        self.cmsg.reserve(cmsg::space(mem::size_of::<[RawFd; 2]>()));
+        self.cmsg.reserve(cmsg::space(mem::size_of::<RawFd>()));
         &mut self.cmsg
     }
 }
@@ -180,7 +180,7 @@ where
             if self.is_readable {
                 if self.eof {
                     let mut item = self.codec.decode_eof(&mut self.read_buf)?;
-                    item.take_platform_handles(|| self.incoming_fds.take_fds());
+                    item.take_platform_handle(|| self.incoming_fds.take_fd());
                     return Ok(Some(item).into());
                 }
 
@@ -188,7 +188,7 @@ where
 
                 if let Some(mut item) = self.codec.decode(&mut self.read_buf)? {
                     trace!("frame decoded from buffer");
-                    item.take_platform_handles(|| self.incoming_fds.take_fds());
+                    item.take_platform_handle(|| self.incoming_fds.take_fd());
                     return Ok(Some(item).into());
                 }
 
@@ -237,22 +237,22 @@ where
 
         // Need to take fd ownership here for `set_frame` to keep fds alive until `do_write`,
         // otherwise fds are closed too early (when `item` is dropped).
-        let fds = item.platform_handles();
+        let fd = item.platform_handle();
         self.codec.encode(item, &mut self.write_buf)?;
 
-        let fds = fds.and_then(|fds| {
+        let fd = fd.and_then(|fd| {
             cmsg::builder(&mut self.outgoing_fds)
-                .rights(&fds.0[..])
+                .rights(&[fd.0])
                 .finish()
                 .ok()
         });
 
-        trace!("item fds: {:?}", fds);
+        trace!("item fd: {:?}", fd);
 
-        if fds.is_some() {
+        if fd.is_some() {
             // Enforce splitting sends on messages that contain file
             // descriptors.
-            self.set_frame(fds);
+            self.set_frame(fd);
         }
 
         Ok(AsyncSink::Ready)
@@ -287,20 +287,8 @@ pub fn framed_with_platformhandles<A, C>(io: A, codec: C) -> FramedWithPlatformH
         eof: false,
         frames: VecDeque::new(),
         write_buf: BytesMut::with_capacity(INITIAL_CAPACITY),
-        outgoing_fds: BytesMut::with_capacity(
-            FDS_CAPACITY * cmsg::space(mem::size_of::<[RawFd; 2]>()),
-        ),
+        outgoing_fds: BytesMut::with_capacity(FDS_CAPACITY * cmsg::space(mem::size_of::<RawFd>())),
     }
-}
-
-fn clone_into_array<A, T>(slice: &[T]) -> A
-where
-    A: Sized + Default + AsMut<[T]>,
-    T: Clone,
-{
-    let mut a = Default::default();
-    <A as AsMut<[T]>>::as_mut(&mut a).clone_from_slice(slice);
-    a
 }
 
 fn close_fds(fds: &[RawFd]) {
@@ -332,8 +320,8 @@ mod tests {
         let mut incoming = super::IncomingFds::new(16);
 
         incoming.cmsg().put_slice(cmsg_bytes());
-        assert!(incoming.take_fds().is_some());
-        assert!(incoming.take_fds().is_none());
+        assert!(incoming.take_fd().is_some());
+        assert!(incoming.take_fd().is_none());
     }
 
     #[test]
@@ -341,23 +329,22 @@ mod tests {
         let mut incoming = super::IncomingFds::new(16);
 
         incoming.cmsg().put_slice(cmsg_bytes());
-        assert!(incoming.take_fds().is_some());
+        assert!(incoming.take_fd().is_some());
         incoming.cmsg().put_slice(cmsg_bytes());
-        assert!(incoming.take_fds().is_some());
-        assert!(incoming.take_fds().is_none());
+        assert!(incoming.take_fd().is_some());
+        assert!(incoming.take_fd().is_none());
     }
 
     #[test]
     fn multiple_cmsg_2() {
         let mut incoming = super::IncomingFds::new(16);
-        println!("cmsg_bytes() {}", cmsg_bytes().len());
 
         incoming.cmsg().put_slice(cmsg_bytes());
         incoming.cmsg().put_slice(cmsg_bytes());
-        assert!(incoming.take_fds().is_some());
+        assert!(incoming.take_fd().is_some());
         incoming.cmsg().put_slice(cmsg_bytes());
-        assert!(incoming.take_fds().is_some());
-        assert!(incoming.take_fds().is_some());
-        assert!(incoming.take_fds().is_none());
+        assert!(incoming.take_fd().is_some());
+        assert!(incoming.take_fd().is_some());
+        assert!(incoming.take_fd().is_none());
     }
 }

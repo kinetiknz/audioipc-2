@@ -202,12 +202,12 @@ impl<'ctx> ClientStream<'ctx> {
         let data = send_recv!(rpc, StreamCreate(create_params) => StreamCreated())?;
 
         debug!(
-            "token = {}, handles = {:?}",
-            data.token, data.platform_handles
+            "token = {}, handle = {:?}",
+            data.token, data.platform_handle
         );
 
         let stream =
-            unsafe { audioipc::MessageStream::from_raw_fd(data.platform_handles[0].into_raw()) };
+            unsafe { audioipc::MessageStream::from_raw_fd(data.platform_handle.into_raw()) };
 
         let input = if init_params.input_stream_params.is_some() {
             Some(Vec::with_capacity(audioipc::SHM_AREA_SIZE))

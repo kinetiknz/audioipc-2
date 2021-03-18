@@ -373,11 +373,8 @@ impl ContextOps for ClientContext {
                                  ContextSetupDeviceCollectionCallback =>
                                  ContextSetupDeviceCollectionCallback())?;
 
-            // TODO: The lowest comms layer expects exactly 3 PlatformHandles, but we only
-            // need one here.  The server sent two dummy valid handles, ignore those (closed on drop)
-            // and use the one we need.
             let stream =
-                unsafe { audioipc::MessageStream::from_raw_fd(fds.platform_handles[0].into_raw()) };
+                unsafe { audioipc::MessageStream::from_raw_fd(fds.platform_handle.into_raw()) };
 
             let server = DeviceCollectionServer {
                 input_device_callback: self.input_device_callback.clone(),

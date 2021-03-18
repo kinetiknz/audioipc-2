@@ -176,28 +176,21 @@ where
         }
 
         // Take handle ownership here.
-        let handles = item.platform_handles();
-        if let Some((handles, target_pid)) = handles {
-            // TODO: This could leak target handles if a duplicate fails - make this more robust.
-            let remote_handles = unsafe {
-                // Attempt to duplicate all 3 handles before checking
-                // result, since we rely on duplicate_platformhandle closing
-                // our source handles.
-                let r1 = duplicate_platformhandle(handles[0], Some(target_pid), true);
-                let r2 = duplicate_platformhandle(handles[1], Some(target_pid), true);
-                [r1?, r2?]
-            };
+        let handle = item.platform_handle();
+        if let Some((handle, target_pid)) = handle {
+            let remote_handle =
+                unsafe { duplicate_platformhandle(handle, Some(target_pid), true)? };
             trace!(
-                "item handles: {:?} remote_handles: {:?}",
-                handles,
-                remote_handles
+                "item handle: {:?} remote_handle: {:?}",
+                handle,
+                remote_handle
             );
-            item.take_platform_handles(|| Some(remote_handles));
+            item.take_platform_handle(|| Some(remote_handle));
         }
 
         self.codec.encode(item, &mut self.write_buf)?;
 
-        if handles.is_some() {
+        if handle.is_some() {
             // Enforce splitting sends on messages that contain file
             // descriptors.
             self.set_frame();

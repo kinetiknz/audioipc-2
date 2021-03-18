@@ -155,11 +155,6 @@ impl PlatformHandle {
         h.handle
     }
 
-    #[allow(clippy::missing_safety_doc)]
-    pub unsafe fn as_raw(&self) -> PlatformHandleType {
-        self.0.borrow().handle
-    }
-
     #[cfg(unix)]
     pub fn duplicate(h: PlatformHandleType) -> Result<PlatformHandle, std::io::Error> {
         unsafe {
@@ -175,12 +170,6 @@ impl PlatformHandle {
     pub fn duplicate(h: PlatformHandleType) -> Result<PlatformHandle, std::io::Error> {
         let dup = unsafe { platformhandle_passing::duplicate_platformhandle(h, None, false) }?;
         Ok(PlatformHandle::new(dup, true))
-    }
-}
-
-impl Clone for PlatformHandle {
-    fn clone(&self) -> Self {
-        PlatformHandle::duplicate(unsafe { self.as_raw() }).unwrap()
     }
 }
 
