@@ -226,10 +226,8 @@ struct ServerStreamCallbacks {
     input_frame_size: u16,
     /// Size of output frame in bytes
     output_frame_size: u16,
-    /// Shared memory buffer for sending input data to client
-    input_shm: Option<SharedMem>,
-    /// Shared memory buffer for receiving output data from client
-    output_shm: Option<SharedMem>,
+    /// Shared memory buffer for transporting audio data to/from client
+    shm: SharedMem,
     /// RPC interface to callback server running in client
     rpc: rpc::ClientProxy<CallbackReq, CallbackResp>,
 }
@@ -244,8 +242,9 @@ impl ServerStreamCallbacks {
         );
 
         unsafe {
-            if let Some(shm) = &mut self.input_shm {
-                shm.get_mut_slice(input.len())
+            if self.input_frame_size != 0 {
+                self.shm
+                    .get_mut_slice(input.len())
                     .unwrap()
                     .copy_from_slice(input);
             }
@@ -266,8 +265,8 @@ impl ServerStreamCallbacks {
                     let nbytes = frames as usize * self.output_frame_size as usize;
                     trace!("Reslice output to {}", nbytes);
                     unsafe {
-                        if let Some(shm) = &self.output_shm {
-                            output[..nbytes].copy_from_slice(shm.get_slice(nbytes).unwrap());
+                        if self.output_frame_size != 0 {
+                            output[..nbytes].copy_from_slice(self.shm.get_slice(nbytes).unwrap());
                         }
                     }
                 }
@@ -682,10 +681,10 @@ impl CubebServer {
         let (ipc_server, ipc_client) = MessageStream::anonymous_ipc_pair()?;
         debug!("Created callback pair: {:?}-{:?}", ipc_server, ipc_client);
         let shm_id = get_shm_id();
-        let (input_shm, input_file) =
-            SharedMem::new(&format!("{}-input", shm_id), audioipc::SHM_AREA_SIZE)?;
-        let (output_shm, output_file) =
-            SharedMem::new(&format!("{}-output", shm_id), audioipc::SHM_AREA_SIZE)?;
+        let (shm, file) = SharedMem::new(&format!("{}-input", shm_id), audioipc::SHM_AREA_SIZE)?;
+        // TODO: The lowest comms layer expects exactly 3 PlatformHandles, but we no longer use the last
+        // PlatformHandle slot, so pass a clone of the shm handle as a dummy value for the client to drop.
+        let dummy = file.clone();
 
         // This code is currently running on the Client/Server RPC
         // handling thread.  We need to move the registration of the
@@ -708,16 +707,10 @@ impl CubebServer {
             Err(_) => bail!("Failed to create callback rpc."),
         };
 
-        // TODO: The lowest comms layer expects exactly 3 PlatformHandles, so we always configure both sides of the shm.
-        // ServerStreamCallbacks only needs the active shm, so drop any unused shm now.
-        let input_shm = params.input_stream_params.and(Some(input_shm));
-        let output_shm = params.output_stream_params.and(Some(output_shm));
-
         let cbs = Box::new(ServerStreamCallbacks {
             input_frame_size,
             output_frame_size,
-            input_shm,
-            output_shm,
+            shm,
             rpc,
         });
 
@@ -729,7 +722,7 @@ impl CubebServer {
 
         Ok(ClientMessage::StreamCreated(StreamCreate {
             token: key,
-            platform_handles: [PlatformHandle::from(ipc_client), input_file, output_file],
+            platform_handles: [PlatformHandle::from(ipc_client), file, dummy],
             target_pid: self.remote_pid.unwrap(),
         }))
     }
