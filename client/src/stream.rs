@@ -56,7 +56,7 @@ pub struct ClientStream<'ctx> {
     shutdown_rx: mpsc::Receiver<()>,
     stream_output_rate: Option<u32>,
     cached_position: Option<(u64, Instant)>,
-    cached_calls: u64,
+    cached_calls: (u64, u64),
 }
 
 struct CallbackServer {
@@ -269,7 +269,7 @@ impl<'ctx> ClientStream<'ctx> {
             shutdown_rx,
             stream_output_rate,
             cached_position: None,
-            cached_calls: 0,
+            cached_calls: (0, 0),
         }));
         Ok(unsafe { Stream::from_ptr(stream as *mut _) })
     }
@@ -278,8 +278,8 @@ impl<'ctx> ClientStream<'ctx> {
 impl<'ctx> Drop for ClientStream<'ctx> {
     fn drop(&mut self) {
         eprintln!(
-            "ClientStream cached {} get_position calls",
-            self.cached_calls
+            "ClientStream cached {}/{} get_position calls",
+            self.cached_calls.0, self.cached_calls.1
         );
         debug!("ClientStream drop");
         let rpc = self.context.rpc();
@@ -310,14 +310,17 @@ impl<'ctx> StreamOps for ClientStream<'ctx> {
 
     fn position(&mut self) -> Result<u64> {
         assert_not_in_callback();
+        let mut calls = self.cached_calls;
+        calls.1 += 1;
         if let Some((last_pos, last_time)) = self.cached_position {
             if last_time.elapsed() < Duration::from_millis(25) {
-                self.cached_calls += 1;
+                calls.0 += 1;
                 // TODO: Needs to be capped by written_pos from data_cb.
                 // TODO: Need to avoid returning < this estimate after any uncached call.
                 let current_pos = last_pos as u128
                     + (last_time.elapsed().as_millis() * self.stream_output_rate.unwrap() as u128
                         / 1000);
+                self.cached_calls = calls;
                 return Ok(current_pos.try_into().unwrap());
             }
         }
@@ -326,6 +329,7 @@ impl<'ctx> StreamOps for ClientStream<'ctx> {
         // TODO: server should send timestamp.
         self.cached_position = Some((current_pos, Instant::now()));
         // TODO: Ensure this is never < a value returned via the cached estimate path.
+        self.cached_calls = calls;
         Ok(current_pos)
     }
 
