@@ -195,7 +195,7 @@ impl RemoteHandle {
 
     fn new_local(handle: PlatformHandleType) -> RemoteHandle {
         RemoteHandle {
-            local_handle: Some(PlatformHandle::new(handle, true)),
+            local_handle: Some(PlatformHandle::new(handle)),
             remote_handle: None,
             target_pid: None,
         }
@@ -220,7 +220,7 @@ impl serde::Serialize for RemoteHandle {
     where
         S: serde::Serializer,
     {
-        let handle = self.remote_handle.unwrap();
+        let handle = self.remote_handle.unwrap_or(crate::INVALID_HANDLE_VALUE);
         serializer.serialize_i64(handle as i64)
     }
 }
@@ -237,10 +237,14 @@ impl<'de> serde::de::Visitor<'de> for RemoteHandleVisitor {
     where
         E: serde::de::Error,
     {
-        let owned = cfg!(windows);
+        let (local_handle, remote_handle) = if cfg!(windows) {
+            (Some(PlatformHandle::new(value as PlatformHandleType)), None)
+        } else {
+            (None, Some(value as PlatformHandleType))
+        };
         Ok(RemoteHandle {
-            local_handle: Some(PlatformHandle::new(value as PlatformHandleType, owned)),
-            remote_handle: None,
+            local_handle,
+            remote_handle,
             target_pid: None,
         })
     }

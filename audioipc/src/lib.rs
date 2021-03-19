@@ -54,8 +54,6 @@ use std::os::unix::io::IntoRawFd;
 #[cfg(windows)]
 use std::os::windows::io::IntoRawHandle;
 
-use std::cell::RefCell;
-
 // This must match the definition of
 // ipc::FileDescriptor::PlatformHandleType in Gecko.
 #[cfg(windows)]
@@ -65,15 +63,13 @@ pub type PlatformHandleType = libc::c_int;
 
 // This stands in for RawFd/RawHandle.
 #[derive(Debug)]
-pub struct PlatformHandle(RefCell<Inner>);
+pub struct PlatformHandle(PlatformHandleType);
 
-#[derive(Debug)]
-struct Inner {
-    handle: PlatformHandleType,
-    owned: bool,
-}
-
+#[cfg(unix)]
 pub const INVALID_HANDLE_VALUE: PlatformHandleType = -1isize as PlatformHandleType;
+
+#[cfg(windows)]
+pub const INVALID_HANDLE_VALUE: PlatformHandleType = winapi::um::handleapi::INVALID_HANDLE_VALUE;
 
 #[cfg(unix)]
 fn valid_handle(handle: PlatformHandleType) -> bool {
@@ -82,34 +78,30 @@ fn valid_handle(handle: PlatformHandleType) -> bool {
 
 #[cfg(windows)]
 fn valid_handle(handle: PlatformHandleType) -> bool {
-    const NULL_HANDLE_VALUE: PlatformHandleType = 0isize as PlatformHandleType;
-    handle != INVALID_HANDLE_VALUE && handle != NULL_HANDLE_VALUE
+    handle != INVALID_HANDLE_VALUE && handle != std::ptr::null_mut()
 }
 
 impl PlatformHandle {
-    pub fn new(raw: PlatformHandleType, owned: bool) -> PlatformHandle {
+    pub fn new(raw: PlatformHandleType) -> PlatformHandle {
         assert!(valid_handle(raw));
-        let inner = Inner { handle: raw, owned };
-        PlatformHandle(RefCell::new(inner))
+        PlatformHandle(raw)
     }
 
     #[cfg(windows)]
     pub fn from<T: IntoRawHandle>(from: T) -> PlatformHandle {
-        PlatformHandle::new(from.into_raw_handle(), true)
+        PlatformHandle::new(from.into_raw_handle())
     }
 
     #[cfg(unix)]
     pub fn from<T: IntoRawFd>(from: T) -> PlatformHandle {
-        PlatformHandle::new(from.into_raw_fd(), true)
+        PlatformHandle::new(from.into_raw_fd())
     }
 
     #[allow(clippy::missing_safety_doc)]
-    #[allow(clippy::wrong_self_convention)]
-    pub unsafe fn into_raw(&self) -> PlatformHandleType {
-        let mut h = self.0.borrow_mut();
-        assert!(h.owned);
-        h.owned = false;
-        h.handle
+    pub unsafe fn into_raw(self) -> PlatformHandleType {
+        let handle = self.0;
+        std::mem::forget(self);
+        handle
     }
 
     #[cfg(unix)]
@@ -126,16 +118,13 @@ impl PlatformHandle {
     #[cfg(windows)]
     pub fn duplicate(h: PlatformHandleType) -> Result<PlatformHandle, std::io::Error> {
         let dup = unsafe { platformhandle_passing::duplicate_platformhandle(h, None, false) }?;
-        Ok(PlatformHandle::new(dup, true))
+        Ok(PlatformHandle::new(dup))
     }
 }
 
 impl Drop for PlatformHandle {
     fn drop(&mut self) {
-        let inner = self.0.borrow();
-        if inner.owned {
-            unsafe { close_platformhandle(inner.handle) }
-        }
+        unsafe { close_platformhandle(self.0) }
     }
 }
 
