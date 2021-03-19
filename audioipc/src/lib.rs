@@ -73,50 +73,7 @@ struct Inner {
     owned: bool,
 }
 
-unsafe impl Send for PlatformHandle {}
-
 pub const INVALID_HANDLE_VALUE: PlatformHandleType = -1isize as PlatformHandleType;
-
-// Custom serialization to treat HANDLEs as i64.  This is not valid in
-// general, but after sending the HANDLE value to a remote process we
-// use it to create a valid HANDLE via DuplicateHandle.
-// To avoid duplicating the serialization code, we're lazy and treat
-// file descriptors as i64 rather than i32.
-impl serde::Serialize for PlatformHandle {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let h = self.0.borrow();
-        serializer.serialize_i64(h.handle as i64)
-    }
-}
-
-struct PlatformHandleVisitor;
-impl<'de> serde::de::Visitor<'de> for PlatformHandleVisitor {
-    type Value = PlatformHandle;
-
-    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("an integer between -2^63 and 2^63")
-    }
-
-    fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        let owned = cfg!(windows);
-        Ok(PlatformHandle::new(value as PlatformHandleType, owned))
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for PlatformHandle {
-    fn deserialize<D>(deserializer: D) -> Result<PlatformHandle, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_i64(PlatformHandleVisitor)
-    }
-}
 
 #[cfg(unix)]
 fn valid_handle(handle: PlatformHandleType) -> bool {

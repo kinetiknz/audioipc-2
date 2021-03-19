@@ -175,17 +175,95 @@ fn opt_str(v: Option<Vec<u8>>) -> *mut c_char {
     }
 }
 
+#[derive(Debug)]
+pub struct RemoteHandle {
+    pub local_handle: Option<PlatformHandle>,
+    pub remote_handle: Option<PlatformHandleType>,
+    pub target_pid: Option<u32>,
+}
+
+unsafe impl Send for RemoteHandle {}
+
+impl RemoteHandle {
+    pub fn new_local_with_target(handle: PlatformHandle, target_pid: u32) -> RemoteHandle {
+        RemoteHandle {
+            local_handle: Some(handle),
+            remote_handle: None,
+            target_pid: Some(target_pid),
+        }
+    }
+
+    fn new_local(handle: PlatformHandleType) -> RemoteHandle {
+        RemoteHandle {
+            local_handle: Some(PlatformHandle::new(handle, true)),
+            remote_handle: None,
+            target_pid: None,
+        }
+    }
+
+    fn new_remote(handle: PlatformHandleType) -> RemoteHandle {
+        RemoteHandle {
+            local_handle: None,
+            remote_handle: Some(handle),
+            target_pid: None,
+        }
+    }
+}
+
+// Custom serialization to treat HANDLEs as i64.  This is not valid in
+// general, but after sending the HANDLE value to a remote process we
+// use it to create a valid HANDLE via DuplicateHandle.
+// To avoid duplicating the serialization code, we're lazy and treat
+// file descriptors as i64 rather than i32.
+impl serde::Serialize for RemoteHandle {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let handle = self.remote_handle.unwrap();
+        serializer.serialize_i64(handle as i64)
+    }
+}
+
+struct RemoteHandleVisitor;
+impl<'de> serde::de::Visitor<'de> for RemoteHandleVisitor {
+    type Value = RemoteHandle;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("an integer between -2^63 and 2^63")
+    }
+
+    fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        let owned = cfg!(windows);
+        Ok(RemoteHandle {
+            local_handle: Some(PlatformHandle::new(value as PlatformHandleType, owned)),
+            remote_handle: None,
+            target_pid: None,
+        })
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for RemoteHandle {
+    fn deserialize<D>(deserializer: D) -> Result<RemoteHandle, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_i64(RemoteHandleVisitor)
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StreamCreate {
     pub token: usize,
-    pub platform_handle: PlatformHandle,
-    pub target_pid: u32,
+    pub platform_handle: RemoteHandle,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RegisterDeviceCollectionChanged {
-    pub platform_handle: PlatformHandle,
-    pub target_pid: u32,
+    pub platform_handle: RemoteHandle,
 }
 
 // Client -> Server messages.
@@ -266,7 +344,7 @@ pub enum CallbackReq {
     },
     State(ffi::cubeb_state),
     DeviceChange,
-    SharedMem(PlatformHandle, u32),
+    SharedMem(RemoteHandle),
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -288,7 +366,7 @@ pub enum DeviceCollectionResp {
 }
 
 pub trait AssocRawPlatformHandle {
-    fn platform_handle(&self) -> Option<(PlatformHandleType, u32)> {
+    fn platform_handle(&mut self) -> Option<(PlatformHandleType, u32)> {
         None
     }
 
@@ -303,15 +381,17 @@ pub trait AssocRawPlatformHandle {
 impl AssocRawPlatformHandle for ServerMessage {}
 
 impl AssocRawPlatformHandle for ClientMessage {
-    fn platform_handle(&self) -> Option<(PlatformHandleType, u32)> {
+    fn platform_handle(&mut self) -> Option<(PlatformHandleType, u32)> {
         unsafe {
             match *self {
-                ClientMessage::StreamCreated(ref data) => {
-                    Some((data.platform_handle.into_raw(), data.target_pid))
-                }
-                ClientMessage::ContextSetupDeviceCollectionCallback(ref data) => {
-                    Some((data.platform_handle.into_raw(), data.target_pid))
-                }
+                ClientMessage::StreamCreated(ref mut data) => Some((
+                    data.platform_handle.local_handle.take().unwrap().into_raw(),
+                    data.platform_handle.target_pid.unwrap(),
+                )),
+                ClientMessage::ContextSetupDeviceCollectionCallback(ref mut data) => Some((
+                    data.platform_handle.local_handle.take().unwrap().into_raw(),
+                    data.platform_handle.target_pid.unwrap(),
+                )),
                 _ => None,
             }
         }
@@ -326,11 +406,19 @@ impl AssocRawPlatformHandle for ClientMessage {
             ClientMessage::StreamCreated(ref mut data) => {
                 let handle =
                     f().expect("platform_handles must be available when processing StreamCreated");
-                data.platform_handle = PlatformHandle::new(handle, owned);
+                data.platform_handle = if owned {
+                    RemoteHandle::new_local(handle)
+                } else {
+                    RemoteHandle::new_remote(handle)
+                };
             }
             ClientMessage::ContextSetupDeviceCollectionCallback(ref mut data) => {
                 let handle = f().expect("platform_handles must be available when processing ContextSetupDeviceCollectionCallback");
-                data.platform_handle = PlatformHandle::new(handle, owned);
+                data.platform_handle = if owned {
+                    RemoteHandle::new_local(handle)
+                } else {
+                    RemoteHandle::new_remote(handle)
+                };
             }
             _ => {}
         }
@@ -341,10 +429,13 @@ impl AssocRawPlatformHandle for DeviceCollectionReq {}
 impl AssocRawPlatformHandle for DeviceCollectionResp {}
 
 impl AssocRawPlatformHandle for CallbackReq {
-    fn platform_handle(&self) -> Option<(PlatformHandleType, u32)> {
+    fn platform_handle(&mut self) -> Option<(PlatformHandleType, u32)> {
         unsafe {
-            if let CallbackReq::SharedMem(ref data, target_pid) = *self {
-                Some((data.into_raw(), target_pid))
+            if let CallbackReq::SharedMem(ref mut data) = *self {
+                Some((
+                    data.local_handle.take().unwrap().into_raw(),
+                    data.target_pid.unwrap(),
+                ))
             } else {
                 None
             }
@@ -356,9 +447,13 @@ impl AssocRawPlatformHandle for CallbackReq {
         F: FnOnce() -> Option<PlatformHandleType>,
     {
         let owned = cfg!(unix);
-        if let CallbackReq::SharedMem(ref mut data, _) = *self {
+        if let CallbackReq::SharedMem(ref mut data) = *self {
             let handle = f().expect("platform_handle must be available when processing SharedMem");
-            *data = PlatformHandle::new(handle, owned);
+            *data = if owned {
+                RemoteHandle::new_local(handle)
+            } else {
+                RemoteHandle::new_remote(handle)
+            };
         }
     }
 }

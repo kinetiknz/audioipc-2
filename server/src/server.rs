@@ -5,7 +5,6 @@
 
 #[cfg(target_os = "linux")]
 use audio_thread_priority::{promote_thread_to_real_time, RtPriorityThreadInfo};
-use audioipc::codec::LengthDelimitedCodec;
 use audioipc::messages::{
     CallbackReq, CallbackResp, ClientMessage, Device, DeviceCollectionReq, DeviceCollectionResp,
     DeviceInfo, RegisterDeviceCollectionChanged, ServerMessage, StreamCreate, StreamCreateParams,
@@ -14,6 +13,7 @@ use audioipc::messages::{
 use audioipc::platformhandle_passing::{framed_with_platformhandles, FramedWithPlatformHandles};
 use audioipc::rpc;
 use audioipc::shm::SharedMem;
+use audioipc::{codec::LengthDelimitedCodec, messages::RemoteHandle};
 use audioipc::{MessageStream, PlatformHandle};
 use cubeb_core as cubeb;
 use cubeb_core::ffi;
@@ -583,8 +583,10 @@ impl CubebServer {
                             devtype: cubeb::DeviceType::empty(),
                         })));
                         let fds = RegisterDeviceCollectionChanged {
-                            platform_handle: PlatformHandle::from(ipc_client),
-                            target_pid: self.remote_pid.unwrap(),
+                            platform_handle: RemoteHandle::new_local_with_target(
+                                PlatformHandle::from(ipc_client),
+                                self.remote_pid.unwrap(),
+                            ),
                         };
 
                         ClientMessage::ContextSetupDeviceCollectionCallback(fds)
@@ -701,7 +703,10 @@ impl CubebServer {
         let handle = unsafe { shm.make_handle().unwrap() };
         // XXX: if response is dropped without waiting on it, is it possible this doesn't run on the client?
         // i.e. does ignore the response cause a cancellation?
-        rpc.call(CallbackReq::SharedMem(handle, self.remote_pid.unwrap()));
+        rpc.call(CallbackReq::SharedMem(RemoteHandle::new_local_with_target(
+            handle,
+            self.remote_pid.unwrap(),
+        )));
 
         let cbs = Box::new(ServerStreamCallbacks {
             input_frame_size,
@@ -718,8 +723,10 @@ impl CubebServer {
 
         Ok(ClientMessage::StreamCreated(StreamCreate {
             token: key,
-            platform_handle: PlatformHandle::from(ipc_client),
-            target_pid: self.remote_pid.unwrap(),
+            platform_handle: RemoteHandle::new_local_with_target(
+                PlatformHandle::from(ipc_client),
+                self.remote_pid.unwrap(),
+            ),
         }))
     }
 

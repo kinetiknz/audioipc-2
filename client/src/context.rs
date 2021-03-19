@@ -369,12 +369,15 @@ impl ContextOps for ClientContext {
         assert_not_in_callback();
 
         if !self.device_collection_rpc {
-            let fds = send_recv!(self.rpc(),
+            let mut fds = send_recv!(self.rpc(),
                                  ContextSetupDeviceCollectionCallback =>
                                  ContextSetupDeviceCollectionCallback())?;
 
-            let stream =
-                unsafe { audioipc::MessageStream::from_raw_fd(fds.platform_handle.into_raw()) };
+            let stream = unsafe {
+                audioipc::MessageStream::from_raw_fd(
+                    fds.platform_handle.local_handle.take().unwrap().into_raw(),
+                )
+            };
 
             let server = DeviceCollectionServer {
                 input_device_callback: self.input_device_callback.clone(),
