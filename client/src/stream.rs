@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex};
 use std::{
     convert::TryInto,
     ffi::{CStr, CString},
-    time::{Duration, SystemTime},
+    time::SystemTime,
 };
 use std::{
     os::raw::c_void,
@@ -325,12 +325,10 @@ impl<'ctx> StreamOps for ClientStream<'ctx> {
     }
 
     fn position(&mut self) -> Result<u64> {
-        let update_cached_position = || {
-            // TODO: maybe make this externally tunable.
-            const CACHE_LIFETIME: Duration = Duration::from_millis(25);
+        let need_cache_update = || {
             if let Some((_, last_time)) = self.cached_position {
                 if let Ok(dt) = last_time.elapsed() {
-                    return dt > CACHE_LIFETIME;
+                    return dt > self.context.position_cache_lifetime();
                 }
             }
             true
@@ -339,7 +337,7 @@ impl<'ctx> StreamOps for ClientStream<'ctx> {
         assert_not_in_callback();
         let mut calls = (self.cached_calls.0, self.cached_calls.1 + 1);
 
-        if update_cached_position() {
+        if need_cache_update() {
             let rpc = self.context.rpc();
             let (current_pos, pos_time) =
                 send_recv!(rpc, StreamGetPosition(self.token) => StreamPosition())?;

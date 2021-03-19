@@ -23,8 +23,6 @@ use std::os::raw::{c_char, c_int};
 thread_local!(static IN_CALLBACK: std::cell::RefCell<bool> = std::cell::RefCell::new(false));
 thread_local!(static AUDIOIPC_INIT_PARAMS: std::cell::RefCell<Option<AudioIpcInitParams>> = std::cell::RefCell::new(None));
 
-// This must match the definition of AudioIpcInitParams in
-// dom/media/CubebUtils.cpp in Gecko.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct AudioIpcInitParams {
@@ -34,6 +32,7 @@ pub struct AudioIpcInitParams {
     pub stack_size: usize,
     pub thread_create_callback: Option<extern "C" fn(*const ::std::os::raw::c_char)>,
     pub thread_destroy_callback: Option<extern "C" fn()>,
+    pub position_cache_lifetime: u64,
 }
 
 unsafe impl Send for AudioIpcInitParams {}
