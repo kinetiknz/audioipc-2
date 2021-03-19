@@ -314,7 +314,7 @@ impl<'ctx> StreamOps for ClientStream<'ctx> {
         calls.1 += 1;
         if let Some((last_pos, last_time)) = self.cached_position {
             // TODO: add tuneable for 25ms cache lifetime.
-            if last_time.elapsed() < Duration::from_millis(25) {
+            if last_time.elapsed() < Duration::from_millis(1000) {
                 calls.0 += 1;
                 // TODO: Needs to be capped by written_pos from data_cb.
                 // TODO: Need to avoid returning < this estimate after any uncached call.
