@@ -15,7 +15,7 @@ use audioipc::{
 use cubeb_backend::{ffi, DeviceRef, Error, Result, Stream, StreamOps};
 use futures::Future;
 use futures_cpupool::{CpuFuture, CpuPool};
-use std::ffi::{CStr, CString};
+use std::{convert::TryInto, ffi::{CStr, CString}, time::{Duration, Instant}};
 use std::os::raw::c_void;
 use std::ptr;
 use std::sync::mpsc;
@@ -50,6 +50,9 @@ pub struct ClientStream<'ctx> {
     device_change_cb: Arc<Mutex<ffi::cubeb_device_changed_callback>>,
     // Signals ClientStream that CallbackServer has dropped.
     shutdown_rx: mpsc::Receiver<()>,
+    stream_output_rate: Option<u32>,
+    cached_position: Option<(u64, Instant)>,
+    cached_calls: u64,
 }
 
 struct CallbackServer {
@@ -195,6 +198,7 @@ impl<'ctx> ClientStream<'ctx> {
         assert_not_in_callback();
 
         let rpc = ctx.rpc();
+        let stream_output_rate = init_params.output_stream_params.map(|p| p.rate);
         let create_params = StreamCreateParams {
             input_stream_params: init_params.input_stream_params,
             output_stream_params: init_params.output_stream_params,
@@ -259,6 +263,9 @@ impl<'ctx> ClientStream<'ctx> {
             token: data.token,
             device_change_cb,
             shutdown_rx,
+            stream_output_rate,
+            cached_position: None,
+            cached_calls: 0,
         }));
         Ok(unsafe { Stream::from_ptr(stream as *mut _) })
     }
@@ -266,6 +273,7 @@ impl<'ctx> ClientStream<'ctx> {
 
 impl<'ctx> Drop for ClientStream<'ctx> {
     fn drop(&mut self) {
+        eprintln!("ClientStream cached {} get_position calls", self.cached_calls);
         debug!("ClientStream drop");
         let rpc = self.context.rpc();
         let _ = send_recv!(rpc, StreamDestroy(self.token) => StreamDestroyed);
@@ -295,8 +303,21 @@ impl<'ctx> StreamOps for ClientStream<'ctx> {
 
     fn position(&mut self) -> Result<u64> {
         assert_not_in_callback();
+        if let Some((last_pos, last_time)) = self.cached_position {
+            if last_time.elapsed() < Duration::from_millis(25) {
+                self.cached_calls += 1;
+                // TODO: Needs to be capped by written_pos from data_cb.
+                // TODO: Need to avoid returning < this estimate after any uncached call.
+                let current_pos = last_pos as u128 + (last_time.elapsed().as_millis() * self.stream_output_rate.unwrap() as u128 / 1000);
+                return Ok(current_pos.try_into().unwrap());
+            }
+        }
         let rpc = self.context.rpc();
-        send_recv!(rpc, StreamGetPosition(self.token) => StreamPosition())
+        let current_pos = send_recv!(rpc, StreamGetPosition(self.token) => StreamPosition())?;
+        // TODO: server should send timestamp.
+        self.cached_position = Some((current_pos, Instant::now()));
+        // TODO: Ensure this is never < a value returned via the cached estimate path.
+        Ok(current_pos)
     }
 
     fn latency(&mut self) -> Result<u32> {
