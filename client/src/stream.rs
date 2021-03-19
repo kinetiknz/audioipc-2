@@ -172,9 +172,9 @@ impl rpc::Server for CallbackServer {
                     Ok(CallbackResp::DeviceChange)
                 })
             }
-            CallbackReq::SharedMem(handle, _) => {
+            CallbackReq::SharedMem(mut handle) => {
                 let shm = unsafe {
-                    SharedMem::from(handle, audioipc::SHM_AREA_SIZE)
+                    SharedMem::from(handle.local_handle.take().unwrap(), audioipc::SHM_AREA_SIZE)
                         .expect("Client failed to set up shmem")
                 };
                 self.shm = Some(shm);
@@ -199,15 +199,18 @@ impl<'ctx> ClientStream<'ctx> {
             input_stream_params: init_params.input_stream_params,
             output_stream_params: init_params.output_stream_params,
         };
-        let data = send_recv!(rpc, StreamCreate(create_params) => StreamCreated())?;
+        let mut data = send_recv!(rpc, StreamCreate(create_params) => StreamCreated())?;
 
         debug!(
             "token = {}, handle = {:?}",
             data.token, data.platform_handle
         );
 
-        let stream =
-            unsafe { audioipc::MessageStream::from_raw_fd(data.platform_handle.into_raw()) };
+        let stream = unsafe {
+            audioipc::MessageStream::from_raw_fd(
+                data.platform_handle.local_handle.take().unwrap().into_raw(),
+            )
+        };
 
         let input = if init_params.input_stream_params.is_some() {
             Some(Vec::with_capacity(audioipc::SHM_AREA_SIZE))
