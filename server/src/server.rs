@@ -20,13 +20,13 @@ use cubeb_core::ffi;
 use futures::future::{self, FutureResult};
 use futures::sync::oneshot;
 use futures::Future;
-use std::convert::From;
 use std::ffi::CStr;
 use std::mem::size_of;
 use std::os::raw::{c_long, c_void};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{cell::RefCell, sync::Mutex};
+use std::{convert::From, time::SystemTime};
 use std::{panic, slice};
 use tokio::reactor;
 use tokio::runtime::current_thread;
@@ -515,7 +515,7 @@ impl CubebServer {
 
             ServerMessage::StreamGetPosition(stm_tok) => try_stream!(self, stm_tok)
                 .position()
-                .map(ClientMessage::StreamPosition)
+                .map(|pos| ClientMessage::StreamPosition((pos, SystemTime::now())))
                 .unwrap_or_else(error),
 
             ServerMessage::StreamGetLatency(stm_tok) => try_stream!(self, stm_tok)

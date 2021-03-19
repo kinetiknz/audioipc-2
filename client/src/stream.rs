@@ -15,14 +15,17 @@ use audioipc::{
 use cubeb_backend::{ffi, DeviceRef, Error, Result, Stream, StreamOps};
 use futures::Future;
 use futures_cpupool::{CpuFuture, CpuPool};
-use std::os::raw::c_void;
 use std::ptr;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::{
     convert::TryInto,
     ffi::{CStr, CString},
-    time::{Duration, Instant},
+    time::{Duration, SystemTime},
+};
+use std::{
+    os::raw::c_void,
+    sync::atomic::{AtomicU64, Ordering},
 };
 use tokio::reactor;
 
@@ -55,13 +58,16 @@ pub struct ClientStream<'ctx> {
     // Signals ClientStream that CallbackServer has dropped.
     shutdown_rx: mpsc::Receiver<()>,
     stream_output_rate: Option<u32>,
-    cached_position: Option<(u64, Instant)>,
+    cached_position: Option<(u64, SystemTime)>,
+    last_position: u64,
     cached_calls: (u64, u64),
+    write_position: Arc<AtomicU64>,
 }
 
 struct CallbackServer {
     shm: Option<SharedMem>,
     input: Option<Vec<u8>>,
+    write_position: Arc<AtomicU64>,
     data_cb: ffi::cubeb_data_callback,
     state_cb: ffi::cubeb_state_callback,
     user_ptr: usize,
@@ -106,6 +112,7 @@ impl rpc::Server for CallbackServer {
                 } as usize;
                 let user_ptr = self.user_ptr;
                 let cb = self.data_cb.unwrap();
+                let write_position = self.write_position.clone();
 
                 self.cpu_pool.spawn_fn(move || {
                     // Input and output reuse the same shmem backing.
@@ -144,6 +151,10 @@ impl rpc::Server for CallbackServer {
                                 nframes as _,
                             )
                         };
+                        if nframes > 0 {
+                            write_position
+                                .fetch_add(nframes as u64, std::sync::atomic::Ordering::Relaxed);
+                        }
 
                         Ok(CallbackResp::Data(nframes as isize))
                     })
@@ -235,6 +246,8 @@ impl<'ctx> ClientStream<'ctx> {
 
         let (_shutdown_tx, shutdown_rx) = mpsc::channel();
 
+        let write_position = Arc::new(AtomicU64::new(0));
+
         let server = CallbackServer {
             shm: None,
             input,
@@ -243,6 +256,7 @@ impl<'ctx> ClientStream<'ctx> {
             user_ptr: user_data,
             cpu_pool,
             device_change_cb: device_change_cb.clone(),
+            write_position: write_position.clone(),
             _shutdown_tx,
         };
 
@@ -269,7 +283,9 @@ impl<'ctx> ClientStream<'ctx> {
             shutdown_rx,
             stream_output_rate,
             cached_position: None,
+            last_position: 0,
             cached_calls: (0, 0),
+            write_position,
         }));
         Ok(unsafe { Stream::from_ptr(stream as *mut _) })
     }
@@ -309,28 +325,39 @@ impl<'ctx> StreamOps for ClientStream<'ctx> {
     }
 
     fn position(&mut self) -> Result<u64> {
-        assert_not_in_callback();
-        let mut calls = self.cached_calls;
-        calls.1 += 1;
-        if let Some((last_pos, last_time)) = self.cached_position {
-            // TODO: add tuneable for 25ms cache lifetime.
-            if last_time.elapsed() < Duration::from_millis(1000) {
-                calls.0 += 1;
-                // TODO: Needs to be capped by written_pos from data_cb.
-                // TODO: Need to avoid returning < this estimate after any uncached call.
-                let current_pos = last_pos as u128
-                    + (last_time.elapsed().as_millis() * self.stream_output_rate.unwrap() as u128
-                        / 1000);
-                self.cached_calls = calls;
-                return Ok(current_pos.try_into().unwrap());
+        let update_cached_position = || {
+            // TODO: maybe make this externally tunable.
+            const CACHE_LIFETIME: Duration = Duration::from_millis(25);
+            if let Some((_, last_time)) = self.cached_position {
+                if let Ok(dt) = last_time.elapsed() {
+                    return dt > CACHE_LIFETIME;
+                }
             }
+            true
+        };
+
+        assert_not_in_callback();
+        let mut calls = (self.cached_calls.0, self.cached_calls.1 + 1);
+
+        if update_cached_position() {
+            let rpc = self.context.rpc();
+            let (current_pos, pos_time) =
+                send_recv!(rpc, StreamGetPosition(self.token) => StreamPosition())?;
+            self.cached_position = Some((current_pos, pos_time));
+        } else {
+            calls.0 += 1;
         }
-        let rpc = self.context.rpc();
-        let current_pos = send_recv!(rpc, StreamGetPosition(self.token) => StreamPosition())?;
-        // TODO: server should send timestamp.
-        self.cached_position = Some((current_pos, Instant::now()));
-        // TODO: Ensure this is never < a value returned via the cached estimate path.
+        let (last_pos, last_time) = self.cached_position.unwrap();
+        let current_pos = last_pos as u128
+            + (last_time.elapsed().unwrap().as_millis() * self.stream_output_rate.unwrap() as u128
+                / 1000);
+        let current_pos: u64 = current_pos.try_into().unwrap();
+        let current_pos = current_pos.max(self.write_position.load(Ordering::Relaxed));
         self.cached_calls = calls;
+        if self.last_position > current_pos {
+            return Ok(self.last_position);
+        }
+        self.last_position = current_pos;
         Ok(current_pos)
     }
 

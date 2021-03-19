@@ -8,9 +8,12 @@ use crate::PlatformHandleType;
 #[cfg(target_os = "linux")]
 use audio_thread_priority::RtPriorityThreadInfo;
 use cubeb::{self, ffi};
-use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_uint};
 use std::ptr;
+use std::{
+    ffi::{CStr, CString},
+    time::SystemTime,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Device {
@@ -325,7 +328,7 @@ pub enum ClientMessage {
 
     StreamStarted,
     StreamStopped,
-    StreamPosition(u64),
+    StreamPosition((u64, SystemTime)),
     StreamLatency(u32),
     StreamInputLatency(u32),
     StreamVolumeSet,
