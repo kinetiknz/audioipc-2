@@ -15,11 +15,15 @@ use audioipc::{
 use cubeb_backend::{ffi, DeviceRef, Error, Result, Stream, StreamOps};
 use futures::Future;
 use futures_cpupool::{CpuFuture, CpuPool};
-use std::{convert::TryInto, ffi::{CStr, CString}, time::{Duration, Instant}};
 use std::os::raw::c_void;
 use std::ptr;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
+use std::{
+    convert::TryInto,
+    ffi::{CStr, CString},
+    time::{Duration, Instant},
+};
 use tokio::reactor;
 
 pub struct Device(ffi::cubeb_device);
@@ -273,7 +277,10 @@ impl<'ctx> ClientStream<'ctx> {
 
 impl<'ctx> Drop for ClientStream<'ctx> {
     fn drop(&mut self) {
-        eprintln!("ClientStream cached {} get_position calls", self.cached_calls);
+        eprintln!(
+            "ClientStream cached {} get_position calls",
+            self.cached_calls
+        );
         debug!("ClientStream drop");
         let rpc = self.context.rpc();
         let _ = send_recv!(rpc, StreamDestroy(self.token) => StreamDestroyed);
@@ -308,7 +315,9 @@ impl<'ctx> StreamOps for ClientStream<'ctx> {
                 self.cached_calls += 1;
                 // TODO: Needs to be capped by written_pos from data_cb.
                 // TODO: Need to avoid returning < this estimate after any uncached call.
-                let current_pos = last_pos as u128 + (last_time.elapsed().as_millis() * self.stream_output_rate.unwrap() as u128 / 1000);
+                let current_pos = last_pos as u128
+                    + (last_time.elapsed().as_millis() * self.stream_output_rate.unwrap() as u128
+                        / 1000);
                 return Ok(current_pos.try_into().unwrap());
             }
         }
