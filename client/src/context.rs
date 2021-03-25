@@ -81,8 +81,7 @@ fn promote_thread(rpc: &rpc::ClientProxy<ServerMessage, ClientMessage>) {
     match get_current_thread_info() {
         Ok(info) => {
             let bytes = info.serialize();
-            // Don't wait for the response, this is on the callback thread, which must not block.
-            rpc.call(ServerMessage::PromoteThreadToRealTime(bytes));
+            rpc.call(ServerMessage::PromoteThreadToRealTime(bytes)).wait().unwrap();
         }
         Err(_) => {
             warn!("Could not remotely promote thread to RT.");
