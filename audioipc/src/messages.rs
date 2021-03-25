@@ -348,7 +348,7 @@ pub enum CallbackReq {
     },
     State(ffi::cubeb_state),
     DeviceChange,
-    SharedMem(RemoteHandle),
+    SharedMem(RemoteHandle, usize),
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -435,7 +435,7 @@ impl AssocRawPlatformHandle for DeviceCollectionResp {}
 impl AssocRawPlatformHandle for CallbackReq {
     fn platform_handle(&mut self) -> Option<(PlatformHandleType, u32)> {
         unsafe {
-            if let CallbackReq::SharedMem(ref mut data) = *self {
+            if let CallbackReq::SharedMem(ref mut data, _) = *self {
                 Some((
                     data.local_handle.take().unwrap().into_raw(),
                     data.target_pid.unwrap(),
@@ -451,7 +451,7 @@ impl AssocRawPlatformHandle for CallbackReq {
         F: FnOnce() -> Option<PlatformHandleType>,
     {
         let owned = cfg!(unix);
-        if let CallbackReq::SharedMem(ref mut data) = *self {
+        if let CallbackReq::SharedMem(ref mut data, _) = *self {
             let handle = f().expect("platform_handle must be available when processing SharedMem");
             *data = if owned {
                 RemoteHandle::new_local(handle)

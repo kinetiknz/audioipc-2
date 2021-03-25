@@ -46,9 +46,6 @@ mod tokio_named_pipes;
 
 pub use crate::messages::{ClientMessage, ServerMessage};
 
-// TODO: Remove hardcoded size and allow allocation based on cubeb backend requirements.
-pub const SHM_AREA_SIZE: usize = 2 * 1024 * 1024;
-
 #[cfg(unix)]
 use std::os::unix::io::IntoRawFd;
 #[cfg(windows)]

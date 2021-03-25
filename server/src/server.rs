@@ -334,8 +334,6 @@ impl Drop for ServerStream {
     }
 }
 
-type StreamSlab = slab::Slab<ServerStream>;
-
 struct CubebServerCallbacks {
     rpc: rpc::ClientProxy<DeviceCollectionReq, DeviceCollectionResp>,
     devtype: cubeb::DeviceType,
@@ -357,10 +355,11 @@ impl CubebServerCallbacks {
 
 pub struct CubebServer {
     handle: current_thread::Handle,
-    streams: StreamSlab,
+    streams: slab::Slab<ServerStream>,
     remote_pid: Option<u32>,
     cbs: Option<Rc<RefCell<CubebServerCallbacks>>>,
     devidmap: DevIdMap,
+    shm_area_size: usize,
 }
 
 impl rpc::Server for CubebServer {
@@ -406,13 +405,14 @@ macro_rules! try_stream {
 }
 
 impl CubebServer {
-    pub fn new(handle: current_thread::Handle) -> Self {
+    pub fn new(handle: current_thread::Handle, shm_area_size: usize) -> Self {
         CubebServer {
             handle,
-            streams: StreamSlab::new(),
+            streams: slab::Slab::<ServerStream>::new(),
             remote_pid: None,
             cbs: None,
             devidmap: DevIdMap::new(),
+            shm_area_size,
         }
     }
 
@@ -677,7 +677,7 @@ impl CubebServer {
 
         let (ipc_server, ipc_client) = MessageStream::anonymous_ipc_pair()?;
         debug!("Created callback pair: {:?}-{:?}", ipc_server, ipc_client);
-        let shm = SharedMem::new(&get_shm_id(), audioipc::SHM_AREA_SIZE)?;
+        let shm = SharedMem::new(&get_shm_id(), self.shm_area_size)?;
 
         // This code is currently running on the Client/Server RPC
         // handling thread.  We need to move the registration of the
@@ -703,10 +703,10 @@ impl CubebServer {
         let handle = unsafe { shm.make_handle().unwrap() };
         // XXX: if response is dropped without waiting on it, is it possible this doesn't run on the client?
         // i.e. does ignore the response cause a cancellation?
-        rpc.call(CallbackReq::SharedMem(RemoteHandle::new_local_with_target(
-            handle,
-            self.remote_pid.unwrap(),
-        )));
+        rpc.call(CallbackReq::SharedMem(
+            RemoteHandle::new_local_with_target(handle, self.remote_pid.unwrap()),
+            self.shm_area_size,
+        ));
 
         let cbs = Box::new(ServerStreamCallbacks {
             input_frame_size,
