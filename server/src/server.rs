@@ -354,7 +354,7 @@ impl CubebServerCallbacks {
 }
 
 pub struct CubebServer {
-    handle: current_thread::Handle,
+    callback_thread: current_thread::Handle,
     streams: slab::Slab<ServerStream>,
     remote_pid: Option<u32>,
     cbs: Option<Rc<RefCell<CubebServerCallbacks>>>,
@@ -405,9 +405,9 @@ macro_rules! try_stream {
 }
 
 impl CubebServer {
-    pub fn new(handle: current_thread::Handle, shm_area_size: usize) -> Self {
+    pub fn new(callback_thread_handle: current_thread::Handle, shm_area_size: usize) -> Self {
         CubebServer {
-            handle,
+            callback_thread: callback_thread_handle,
             streams: slab::Slab::<ServerStream>::new(),
             remote_pid: None,
             cbs: None,
@@ -566,7 +566,7 @@ impl CubebServer {
                     // bind_client to the callback RPC handling thread.  This is
                     // done by spawning a future on `handle`.
                     let (tx, rx) = oneshot::channel();
-                    self.handle
+                    self.callback_thread
                         .spawn(futures::future::lazy(move || {
                             let handle = reactor::Handle::default();
                             let stream = ipc_server.into_tokio_ipc(&handle).unwrap();
@@ -684,7 +684,7 @@ impl CubebServer {
         // bind_client to the callback RPC handling thread.  This is
         // done by spawning a future on `handle`.
         let (tx, rx) = oneshot::channel();
-        self.handle
+        self.callback_thread
             .spawn(futures::future::lazy(move || {
                 let handle = reactor::Handle::default();
                 let stream = ipc_server.into_tokio_ipc(&handle).unwrap();

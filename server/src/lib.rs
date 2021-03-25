@@ -130,7 +130,7 @@ pub extern "C" fn audioipc_server_new_client(
     let (wait_tx, wait_rx) = oneshot::channel();
     let wrapper: &ServerWrapper = unsafe { &*(p as *mut _) };
 
-    let core_handle = wrapper.callback_thread.handle();
+    let callback_thread_handle = wrapper.callback_thread.handle();
 
     // We create a connected pair of anonymous IPC endpoints. One side
     // is registered with the reactor core, the other side is returned
@@ -148,7 +148,7 @@ pub extern "C" fn audioipc_server_new_client(
                     ipc_server.into_tokio_ipc(&handle)
                     .map(move |sock| {
                         let transport = framed_with_platformhandles(sock, Default::default());
-                        rpc::bind_server(transport, server::CubebServer::new(core_handle, shm_area_size));
+                        rpc::bind_server(transport, server::CubebServer::new(callback_thread_handle, shm_area_size));
                     }).map_err(|_| ())
                     // Notify waiting thread that server has been registered.
                     .and_then(|_| wait_tx.send(()))
