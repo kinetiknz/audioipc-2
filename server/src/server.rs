@@ -325,6 +325,7 @@ fn get_shm_id() -> String {
 struct ServerStream {
     stream: Option<cubeb::Stream>,
     cbs: Box<ServerStreamCallbacks>,
+    shm_setup: Option<rpc::Response<CallbackResp>>,
 }
 
 impl Drop for ServerStream {
@@ -695,18 +696,18 @@ impl CubebServer {
             }))
             .expect("Failed to spawn CallbackClient");
 
-        let rpc: rpc::ClientProxy<CallbackReq, CallbackResp> = match rx.wait() {
+        let rpc = match rx.wait() {
             Ok(rpc) => rpc,
             Err(_) => bail!("Failed to create callback rpc."),
         };
 
-        let handle = unsafe { shm.make_handle().unwrap() };
         // XXX: if response is dropped without waiting on it, is it possible this doesn't run on the client?
         // i.e. does ignore the response cause a cancellation?
-        rpc.call(CallbackReq::SharedMem(
-            RemoteHandle::new_local_with_target(handle, self.remote_pid.unwrap()),
+        let shm_handle = unsafe { shm.make_handle().unwrap() };
+        let shm_setup = Some(rpc.call(CallbackReq::SharedMem(
+            RemoteHandle::new_local_with_target(shm_handle, self.remote_pid.unwrap()),
             self.shm_area_size,
-        ));
+        )));
 
         let cbs = Box::new(ServerStreamCallbacks {
             input_frame_size,
@@ -719,7 +720,7 @@ impl CubebServer {
         let key = entry.key();
         debug!("Registering stream {:?}", key);
 
-        entry.insert(ServerStream { stream: None, cbs });
+        entry.insert(ServerStream { stream: None, shm_setup, cbs });
 
         Ok(ClientMessage::StreamCreated(StreamCreate {
             token: key,
@@ -760,6 +761,9 @@ impl CubebServer {
         let server_stream = &mut self.streams[stm_tok];
         assert!(size_of::<Box<ServerStreamCallbacks>>() == size_of::<usize>());
         let user_ptr = server_stream.cbs.as_ref() as *const ServerStreamCallbacks as *mut c_void;
+
+        // SharedMem setup message should've been processed by client by now.
+        server_stream.shm_setup.take().wait().unwrap();
 
         let stream = unsafe {
             let stream = context.stream_init(
